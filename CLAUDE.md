@@ -13,10 +13,30 @@ Kärn-API:et i paketet:
 
 ## Status
 - [x] Granskat `ArxivReferenceChecker.__init__` (`refchecker.py:263`) och `verify_reference()` (`refchecker.py:2588`).
-- [x] Skissat MCP-server (~130 rader) med verktyget `verify_citation`.
-- [ ] Skapa paketstruktur `mcp_refchecker/` + `pyproject.toml`.
-- [ ] Testa mot riktiga referenser (känd korrekt + känd hallucinerad).
-- [ ] Registrera i `claude_desktop_config.json` och verifiera end-to-end via Claude Desktop.
+- [x] Skissat MCP-server med verktyget `verify_citation`.
+- [x] Skapat paketstruktur `mcp_refchecker/` + `pyproject.toml`.
+- [x] Skapat GitHub-repo: https://github.com/JonasBaath/mcp-refchecker (privat, tag v0.1.0 pre-release).
+- [x] Betatest: 10/10 fall godkända i clean venv.
+- [ ] Registrera i `claude_desktop_config.json` och verifiera end-to-end via Claude Desktop (Fas 3).
+- [ ] Göra repot publikt när Fas 3 är godkänd.
+- [ ] Överväga PyPI-publicering.
+
+## Designbeslut (implementerat)
+- **Singleton-checker + `asyncio.Lock`** — `ArxivReferenceChecker.__init__` är dyrt, initieras lat vid första anropet
+- **`asyncio.to_thread(checker.verify_reference, ...)`** — synkrona HTTP-anrop måste av async-loopen
+- **`llm_config={"disabled": True}`** — bara källverifiering, ingen LLM-hallucinationsdetektion
+- **`types.SimpleNamespace`-stub** för `source_paper` — används bara för loggning i refchecker
+- **`raw_text`-fält** byggs från title+authors+year — krävs för att undvika `KeyError` i `verify_reference_standard`
+- **Normalisering av refchecker-output**:
+  - Promotera plain `year`/`author`/`venue` warnings med "mismatch" till hårda fel (refchecker är inkonsekvent — markerar year-mismatch som warning men author-mismatch som error)
+  - Demotera `error_type` med "missing" till warnings när paper hittades (saknade input-fält är inte hallucination)
+  - Version-relaterade warnings (`(v6 vs v7)`) och arxiv-preprint-vs-venue lämnas som warnings
+- **Fuzzy fallback mot Crossref** när refchecker returnerar unverified — fångar stilistiska variationer men INTE riktiga stavfel (se README)
+
+## Fuzzy fallback-upptäckten
+Provade i ordning: **Semantic Scholar** (rate-limit 429 utan API-nyckel) → **OpenAlex** (ingen fuzzy-matchning alls — strikt token-sökning, noll träffar på typos) → **Crossref** (bäst av de tre, men samma fundamentala begränsning).
+
+**Slutsats:** Ingen fri akademisk API klarar riktiga stavfel i titlar. Alla gör keyword/token-matchning och ett felstavat ord försvinner ur indexet. För att lösa det skulle semantic embeddings krävas (OpenAI/Voyage — paid API). Begränsningen är dokumenterad i README under "Fuzzy fallback and its limitations".
 
 ## Designbeslut
 - **Singleton-checker + `asyncio.Lock`** — `__init__` är dyr (bygger hybrid-checker, ev. LLM, web search). Initieras lat vid första anropet.
