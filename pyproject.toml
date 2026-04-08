@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-refchecker"
+version = "0.1.0"
+description = "MCP server for verifying academic citations via Semantic Scholar, OpenAlex, and CrossRef"
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "Jonas Bååth"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "academic-refchecker>=1.2.0",
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+mcp-refchecker = "mcp_refchecker.server:main"
+
+[project.urls]
+Repository = "https://github.com/JonasBaath/mcp-refchecker"
+"Bug Tracker" = "https://github.com/JonasBaath/mcp-refchecker/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mcp_refchecker*"]
