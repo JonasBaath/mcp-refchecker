@@ -18,7 +18,8 @@ def _debug(msg: str) -> None:
     if os.environ.get("MCP_REFCHECKER_DEBUG"):
         print(f"[mcp-refchecker debug] {msg}", file=sys.stderr)
 
-OPENALEX_SEARCH_URL = "https://api.openalex.org/works"
+CROSSREF_SEARCH_URL = "https://api.crossref.org/works"
+CROSSREF_USER_AGENT_BASE = "mcp-refchecker/0.1.0"
 FUZZY_MIN_RATIO = 85
 FUZZY_CANDIDATE_LIMIT = 5
 
@@ -73,31 +74,67 @@ def _build_reference(
     return ref
 
 
-def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None:
-    """Query OpenAlex's search endpoint and find the best fuzzy title match.
-    Used as fallback when refchecker's stricter validation returned unverified.
-    Catches typos and minor title variations.
+def _crossref_year(item: dict) -> int | None:
+    """Extract publication year from a Crossref item. Tries published-print,
+    published-online, issued, and created in order."""
+    for key in ("published-print", "published-online", "issued", "created"):
+        entry = item.get(key) or {}
+        parts = entry.get("date-parts") or []
+        if parts and parts[0]:
+            year = parts[0][0]
+            if isinstance(year, int):
+                return year
+    return None
 
-    OpenAlex is used instead of Semantic Scholar because it has no strict rate
-    limits for unauthenticated use and supports a 'polite pool' via mailto param.
+
+def _crossref_authors(item: dict) -> list[str]:
+    """Extract author names from a Crossref item as 'Given Family' strings."""
+    authors = item.get("author") or []
+    names = []
+    for a in authors:
+        given = a.get("given", "")
+        family = a.get("family", "")
+        name = f"{given} {family}".strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None:
+    """Query Crossref's /works endpoint with fuzzy title search and return
+    the best match above min_ratio. Used as fallback when refchecker's
+    stricter validation returned unverified. Catches typos and minor title
+    variations.
+
+    Crossref is used because:
+    - Free, no API key required
+    - Documented fuzzy title matching via query.title
+    - Authoritative metadata (DOIs are registered here)
+    - No strict rate limit for polite pool (with mailto in User-Agent)
+
+    Set CROSSREF_MAILTO env var to use the polite pool for better performance.
 
     Returns a dict with matched paper info and similarity score, or None if
     no sufficiently close match was found.
     """
-    params: dict[str, Any] = {
-        "search": title,
-        "per_page": FUZZY_CANDIDATE_LIMIT,
+    mailto = os.environ.get("CROSSREF_MAILTO")
+    user_agent = (
+        f"{CROSSREF_USER_AGENT_BASE} (mailto:{mailto})"
+        if mailto else CROSSREF_USER_AGENT_BASE
+    )
+    headers = {"User-Agent": user_agent}
+    params = {
+        "query.title": title,
+        "rows": FUZZY_CANDIDATE_LIMIT,
+        "select": "DOI,title,author,published-print,published-online,issued,created,container-title,URL",
     }
-    # Polite pool — provides better access when a contact email is set
-    mailto = os.environ.get("OPENALEX_MAILTO")
-    if mailto:
-        params["mailto"] = mailto
 
-    _debug(f"fuzzy_fallback: querying OpenAlex for '{title}'")
+    _debug(f"fuzzy_fallback: querying Crossref for '{title}'")
     try:
         response = requests.get(
-            OPENALEX_SEARCH_URL,
+            CROSSREF_SEARCH_URL,
             params=params,
+            headers=headers,
             timeout=10,
         )
         _debug(f"fuzzy_fallback: status={response.status_code}")
@@ -105,7 +142,8 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
             _debug(f"fuzzy_fallback: non-200 body: {response.text[:300]}")
             return None
         data = response.json() or {}
-        candidates = data.get("results") or []
+        message = data.get("message") or {}
+        candidates = message.get("items") or []
         _debug(f"fuzzy_fallback: got {len(candidates)} candidates")
         if not candidates:
             return None
@@ -114,7 +152,8 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
         best_ratio = 0
         title_lower = title.lower()
         for candidate in candidates:
-            candidate_title = (candidate.get("title") or "").strip()
+            titles = candidate.get("title") or []
+            candidate_title = (titles[0] if titles else "").strip()
             if not candidate_title:
                 continue
             ratio = fuzz.ratio(title_lower, candidate_title.lower())
@@ -125,26 +164,14 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
         if best_candidate is None or best_ratio < min_ratio:
             _debug(f"fuzzy_fallback: best ratio {best_ratio} < {min_ratio}, no match")
             return None
-        # Extract metadata from OpenAlex's response shape
-        authorships = best_candidate.get("authorships") or []
-        author_names = []
-        for authorship in authorships:
-            author = authorship.get("author") or {}
-            name = author.get("display_name")
-            if name:
-                author_names.append(name)
-        host_venue = best_candidate.get("host_venue") or {}
-        primary_location = best_candidate.get("primary_location") or {}
-        source = primary_location.get("source") or {}
-        venue = host_venue.get("display_name") or source.get("display_name")
-        doi = best_candidate.get("doi") or ""
-        url_out = doi if doi else best_candidate.get("id")
+        titles = best_candidate.get("title") or []
+        container_title = best_candidate.get("container-title") or []
         return {
-            "title": best_candidate.get("title"),
-            "authors": author_names,
-            "year": best_candidate.get("publication_year"),
-            "venue": venue,
-            "url": url_out,
+            "title": titles[0] if titles else None,
+            "authors": _crossref_authors(best_candidate),
+            "year": _crossref_year(best_candidate),
+            "venue": container_title[0] if container_title else None,
+            "url": best_candidate.get("URL"),
             "similarity": best_ratio,
         }
     except Exception as e:
