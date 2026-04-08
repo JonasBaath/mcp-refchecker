@@ -18,7 +18,7 @@ def _debug(msg: str) -> None:
     if os.environ.get("MCP_REFCHECKER_DEBUG"):
         print(f"[mcp-refchecker debug] {msg}", file=sys.stderr)
 
-S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+OPENALEX_SEARCH_URL = "https://api.openalex.org/works"
 FUZZY_MIN_RATIO = 85
 FUZZY_CANDIDATE_LIMIT = 5
 
@@ -74,25 +74,30 @@ def _build_reference(
 
 
 def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None:
-    """Query Semantic Scholar's general search endpoint and find the best
-    fuzzy title match. Used as fallback when refchecker's stricter validation
-    returned unverified. Catches typos and minor title variations.
+    """Query OpenAlex's search endpoint and find the best fuzzy title match.
+    Used as fallback when refchecker's stricter validation returned unverified.
+    Catches typos and minor title variations.
+
+    OpenAlex is used instead of Semantic Scholar because it has no strict rate
+    limits for unauthenticated use and supports a 'polite pool' via mailto param.
 
     Returns a dict with matched paper info and similarity score, or None if
     no sufficiently close match was found.
     """
-    api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-    headers = {"x-api-key": api_key} if api_key else {}
-    _debug(f"fuzzy_fallback: querying S2 for '{title}'")
+    params: dict[str, Any] = {
+        "search": title,
+        "per_page": FUZZY_CANDIDATE_LIMIT,
+    }
+    # Polite pool — provides better access when a contact email is set
+    mailto = os.environ.get("OPENALEX_MAILTO")
+    if mailto:
+        params["mailto"] = mailto
+
+    _debug(f"fuzzy_fallback: querying OpenAlex for '{title}'")
     try:
         response = requests.get(
-            S2_SEARCH_URL,
-            params={
-                "query": title,
-                "limit": FUZZY_CANDIDATE_LIMIT,
-                "fields": "title,authors,year,venue,externalIds,url",
-            },
-            headers=headers,
+            OPENALEX_SEARCH_URL,
+            params=params,
             timeout=10,
         )
         _debug(f"fuzzy_fallback: status={response.status_code}")
@@ -100,7 +105,7 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
             _debug(f"fuzzy_fallback: non-200 body: {response.text[:300]}")
             return None
         data = response.json() or {}
-        candidates = data.get("data") or []
+        candidates = data.get("results") or []
         _debug(f"fuzzy_fallback: got {len(candidates)} candidates")
         if not candidates:
             return None
@@ -120,13 +125,26 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
         if best_candidate is None or best_ratio < min_ratio:
             _debug(f"fuzzy_fallback: best ratio {best_ratio} < {min_ratio}, no match")
             return None
-        authors_raw = best_candidate.get("authors") or []
+        # Extract metadata from OpenAlex's response shape
+        authorships = best_candidate.get("authorships") or []
+        author_names = []
+        for authorship in authorships:
+            author = authorship.get("author") or {}
+            name = author.get("display_name")
+            if name:
+                author_names.append(name)
+        host_venue = best_candidate.get("host_venue") or {}
+        primary_location = best_candidate.get("primary_location") or {}
+        source = primary_location.get("source") or {}
+        venue = host_venue.get("display_name") or source.get("display_name")
+        doi = best_candidate.get("doi") or ""
+        url_out = doi if doi else best_candidate.get("id")
         return {
             "title": best_candidate.get("title"),
-            "authors": [a.get("name") for a in authors_raw if a.get("name")],
-            "year": best_candidate.get("year"),
-            "venue": best_candidate.get("venue"),
-            "url": best_candidate.get("url"),
+            "authors": author_names,
+            "year": best_candidate.get("publication_year"),
+            "venue": venue,
+            "url": url_out,
             "similarity": best_ratio,
         }
     except Exception as e:
