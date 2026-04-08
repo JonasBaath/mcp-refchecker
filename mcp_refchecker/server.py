@@ -101,17 +101,19 @@ def _crossref_authors(item: dict) -> list[str]:
 
 
 def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None:
-    """Query Crossref's /works endpoint with fuzzy title search and return
-    the best match above min_ratio. Used as fallback when refchecker's
-    stricter validation returned unverified. Catches typos and minor title
-    variations.
+    """Query Crossref's /works endpoint and return the best title match above
+    min_ratio. Used as fallback when refchecker's stricter validation returned
+    unverified.
 
-    Crossref is used because:
-    - Free, no API key required
-    - Documented fuzzy title matching via query.title
-    - Authoritative metadata (DOIs are registered here)
-    - No strict rate limit for polite pool (with mailto in User-Agent)
+    Scope: catches stylistic title variations (case differences, punctuation,
+    word order, minor rewording) — NOT real typos in distinctive title words.
+    Free academic search APIs do keyword/token matching, so a misspelled word
+    simply isn't in the index. For a title like "Atention Is All You Need",
+    Crossref returns papers matching "All You Need" but not the real paper.
+    Catching typos would require semantic embeddings (paid API).
 
+    Crossref is used because it's free, requires no API key, is authoritative
+    for DOI metadata, and supports a polite pool via mailto in User-Agent.
     Set CROSSREF_MAILTO env var to use the polite pool for better performance.
 
     Returns a dict with matched paper info and similarity score, or None if
@@ -267,9 +269,11 @@ async def verify_citation(
             else:
                 hard_errors.append(e)
 
-    # Fuzzy fallback: if refchecker returned "unverified", try a direct fuzzy
-    # match against Semantic Scholar's search/match endpoint. Catches typos
-    # that refchecker's stricter validation rejects.
+    # Fuzzy fallback: if refchecker returned "unverified", try a secondary
+    # Crossref search to catch stylistic title variations (case, punctuation,
+    # word order) that refchecker's strict comparison may have rejected.
+    # NOTE: this does NOT catch real typos in distinctive words — see
+    # _fuzzy_fallback docstring.
     possible_match: dict | None = None
     unverified = any(e.get("error_type") == "unverified" for e in hard_errors)
     if not paper_found and unverified:
@@ -278,7 +282,7 @@ async def verify_citation(
             warnings.append({
                 "warning_type": "fuzzy_match",
                 "warning_details": (
-                    f"Exact title not found. Closest match in Semantic Scholar: "
+                    f"Exact title not found. Closest match in Crossref: "
                     f"'{possible_match['title']}' "
                     f"(similarity: {possible_match['similarity']}%). "
                     f"Verify whether this is the intended reference."
