@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import types
 from typing import Any
 
@@ -11,6 +12,11 @@ import requests
 from fuzzywuzzy import fuzz
 from mcp.server.fastmcp import FastMCP
 from refchecker import ArxivReferenceChecker
+
+
+def _debug(msg: str) -> None:
+    if os.environ.get("MCP_REFCHECKER_DEBUG"):
+        print(f"[mcp-refchecker debug] {msg}", file=sys.stderr)
 
 S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 FUZZY_MIN_RATIO = 85
@@ -77,6 +83,7 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
     """
     api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
     headers = {"x-api-key": api_key} if api_key else {}
+    _debug(f"fuzzy_fallback: querying S2 for '{title}'")
     try:
         response = requests.get(
             S2_SEARCH_URL,
@@ -88,10 +95,13 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
             headers=headers,
             timeout=10,
         )
+        _debug(f"fuzzy_fallback: status={response.status_code}")
         if response.status_code != 200:
+            _debug(f"fuzzy_fallback: non-200 body: {response.text[:300]}")
             return None
         data = response.json() or {}
         candidates = data.get("data") or []
+        _debug(f"fuzzy_fallback: got {len(candidates)} candidates")
         if not candidates:
             return None
         # Scan all candidates and pick the one with highest fuzzy ratio
@@ -103,10 +113,12 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
             if not candidate_title:
                 continue
             ratio = fuzz.ratio(title_lower, candidate_title.lower())
+            _debug(f"fuzzy_fallback: candidate '{candidate_title[:60]}' ratio={ratio}")
             if ratio > best_ratio:
                 best_ratio = ratio
                 best_candidate = candidate
         if best_candidate is None or best_ratio < min_ratio:
+            _debug(f"fuzzy_fallback: best ratio {best_ratio} < {min_ratio}, no match")
             return None
         authors_raw = best_candidate.get("authors") or []
         return {
@@ -117,7 +129,8 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
             "url": best_candidate.get("url"),
             "similarity": best_ratio,
         }
-    except Exception:
+    except Exception as e:
+        _debug(f"fuzzy_fallback: exception {type(e).__name__}: {e}")
         return None
 
 
