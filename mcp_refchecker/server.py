@@ -35,7 +35,14 @@ def _build_reference(
     arxiv_id: str | None,
     url: str | None,
 ) -> dict[str, Any]:
-    ref: dict[str, Any] = {"title": title}
+    # Build raw_text — used by verify_reference_standard for logging/fallback paths
+    parts: list[str] = []
+    if authors:
+        parts.append(", ".join(authors))
+    if year:
+        parts.append(f"({year})")
+    parts.append(title)
+    ref: dict[str, Any] = {"title": title, "raw_text": " ".join(parts)}
     if authors:
         ref["authors"] = authors
     if year:
