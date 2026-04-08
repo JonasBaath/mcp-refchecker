@@ -102,9 +102,24 @@ async def verify_citation(
         checker.verify_reference, source_paper, reference
     )
 
-    hard_errors = [e for e in (errors or []) if "error_type" in e]
-    warnings = [e for e in (errors or []) if "warning_type" in e]
-    info = [e for e in (errors or []) if "info_type" in e]
+    paper_found = verified_data is not None
+    hard_errors: list[dict] = []
+    warnings: list[dict] = []
+    info: list[dict] = []
+
+    for e in errors or []:
+        if "info_type" in e:
+            info.append(e)
+        elif "warning_type" in e:
+            warnings.append(e)
+        elif "error_type" in e:
+            # If paper was found and the error is only that a field was missing
+            # in the input (not wrong), treat as a warning — missing input metadata
+            # is not proof of hallucination.
+            if paper_found and "missing" in e.get("error_details", "").lower():
+                warnings.append(e)
+            else:
+                hard_errors.append(e)
 
     result: dict[str, Any] = {
         "verified": len(hard_errors) == 0,
