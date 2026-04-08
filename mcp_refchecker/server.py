@@ -102,11 +102,17 @@ async def verify_citation(
         checker.verify_reference, source_paper, reference
     )
 
+    hard_errors = [e for e in (errors or []) if "error_type" in e]
+    warnings = [e for e in (errors or []) if "warning_type" in e]
+    info = [e for e in (errors or []) if "info_type" in e]
+
     result: dict[str, Any] = {
-        "verified": errors is None,
+        "verified": len(hard_errors) == 0,
         "url": paper_url,
         "matched_paper": None,
-        "errors": errors,
+        "errors": hard_errors or None,
+        "warnings": warnings or None,
+        "info": info or None,
     }
 
     if isinstance(verified_data, dict):
