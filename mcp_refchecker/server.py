@@ -12,8 +12,9 @@ from fuzzywuzzy import fuzz
 from mcp.server.fastmcp import FastMCP
 from refchecker import ArxivReferenceChecker
 
-S2_SEARCH_MATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search/match"
+S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 FUZZY_MIN_RATIO = 85
+FUZZY_CANDIDATE_LIMIT = 5
 
 mcp = FastMCP("mcp-refchecker")
 
@@ -67,9 +68,9 @@ def _build_reference(
 
 
 def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None:
-    """Query Semantic Scholar's search/match endpoint directly to find a close
-    fuzzy match when refchecker's stricter validation returned unverified.
-    Catches single-letter typos and minor title variations.
+    """Query Semantic Scholar's general search endpoint and find the best
+    fuzzy title match. Used as fallback when refchecker's stricter validation
+    returned unverified. Catches typos and minor title variations.
 
     Returns a dict with matched paper info and similarity score, or None if
     no sufficiently close match was found.
@@ -78,9 +79,10 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
     headers = {"x-api-key": api_key} if api_key else {}
     try:
         response = requests.get(
-            S2_SEARCH_MATCH_URL,
+            S2_SEARCH_URL,
             params={
                 "query": title,
+                "limit": FUZZY_CANDIDATE_LIMIT,
                 "fields": "title,authors,year,venue,externalIds,url",
             },
             headers=headers,
@@ -92,24 +94,54 @@ def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None
         candidates = data.get("data") or []
         if not candidates:
             return None
-        best = candidates[0]
-        best_title = (best.get("title") or "").strip()
-        if not best_title:
+        # Scan all candidates and pick the one with highest fuzzy ratio
+        best_candidate = None
+        best_ratio = 0
+        title_lower = title.lower()
+        for candidate in candidates:
+            candidate_title = (candidate.get("title") or "").strip()
+            if not candidate_title:
+                continue
+            ratio = fuzz.ratio(title_lower, candidate_title.lower())
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_candidate = candidate
+        if best_candidate is None or best_ratio < min_ratio:
             return None
-        similarity = fuzz.ratio(title.lower(), best_title.lower())
-        if similarity < min_ratio:
-            return None
-        authors_raw = best.get("authors") or []
+        authors_raw = best_candidate.get("authors") or []
         return {
-            "title": best_title,
+            "title": best_candidate.get("title"),
             "authors": [a.get("name") for a in authors_raw if a.get("name")],
-            "year": best.get("year"),
-            "venue": best.get("venue"),
-            "url": best.get("url"),
-            "similarity": similarity,
+            "year": best_candidate.get("year"),
+            "venue": best_candidate.get("venue"),
+            "url": best_candidate.get("url"),
+            "similarity": best_ratio,
         }
     except Exception:
         return None
+
+
+def _is_real_mismatch_warning(w: dict) -> bool:
+    """Return True if a warning represents a real metadata conflict that
+    should block verification (not a version-related or arxiv-preprint
+    benign warning).
+
+    refchecker inconsistently marks year mismatches as warning_type (instead
+    of error_type like it does for authors). Promote plain 'year'/'author'
+    warnings with 'mismatch' in the details to hard errors.
+    """
+    wtype = w.get("warning_type", "")
+    details = (w.get("warning_details") or "").lower()
+    # Version-related differences are benign (arxiv v1 vs v2, etc.)
+    if "(v" in wtype:
+        return False
+    # arXiv preprint vs published venue is benign metadata drift
+    if "arxiv preprint" in details:
+        return False
+    # Plain year/author/venue warnings with "mismatch" = real conflict
+    if wtype in ("year", "author", "venue") and "mismatch" in details:
+        return True
+    return False
 
 
 def _stub_source_paper() -> types.SimpleNamespace:
@@ -162,7 +194,12 @@ async def verify_citation(
         if "info_type" in e:
             info.append(e)
         elif "warning_type" in e:
-            warnings.append(e)
+            # Promote real year/author/venue mismatches (marked as warnings by
+            # refchecker) to hard errors — they indicate real metadata conflict.
+            if _is_real_mismatch_warning(e):
+                hard_errors.append(e)
+            else:
+                warnings.append(e)
         elif "error_type" in e:
             # If paper was found and the error is only that a field was missing
             # in the input (not wrong), treat as a warning — missing input metadata
