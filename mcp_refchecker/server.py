@@ -7,8 +7,13 @@ import os
 import types
 from typing import Any
 
+import requests
+from fuzzywuzzy import fuzz
 from mcp.server.fastmcp import FastMCP
 from refchecker import ArxivReferenceChecker
+
+S2_SEARCH_MATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search/match"
+FUZZY_MIN_RATIO = 85
 
 mcp = FastMCP("mcp-refchecker")
 
@@ -59,6 +64,52 @@ def _build_reference(
     elif arxiv_id:
         ref["url"] = f"https://arxiv.org/abs/{arxiv_id}"
     return ref
+
+
+def _fuzzy_fallback(title: str, min_ratio: int = FUZZY_MIN_RATIO) -> dict | None:
+    """Query Semantic Scholar's search/match endpoint directly to find a close
+    fuzzy match when refchecker's stricter validation returned unverified.
+    Catches single-letter typos and minor title variations.
+
+    Returns a dict with matched paper info and similarity score, or None if
+    no sufficiently close match was found.
+    """
+    api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+    headers = {"x-api-key": api_key} if api_key else {}
+    try:
+        response = requests.get(
+            S2_SEARCH_MATCH_URL,
+            params={
+                "query": title,
+                "fields": "title,authors,year,venue,externalIds,url",
+            },
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return None
+        data = response.json() or {}
+        candidates = data.get("data") or []
+        if not candidates:
+            return None
+        best = candidates[0]
+        best_title = (best.get("title") or "").strip()
+        if not best_title:
+            return None
+        similarity = fuzz.ratio(title.lower(), best_title.lower())
+        if similarity < min_ratio:
+            return None
+        authors_raw = best.get("authors") or []
+        return {
+            "title": best_title,
+            "authors": [a.get("name") for a in authors_raw if a.get("name")],
+            "year": best.get("year"),
+            "venue": best.get("venue"),
+            "url": best.get("url"),
+            "similarity": similarity,
+        }
+    except Exception:
+        return None
 
 
 def _stub_source_paper() -> types.SimpleNamespace:
@@ -121,10 +172,29 @@ async def verify_citation(
             else:
                 hard_errors.append(e)
 
+    # Fuzzy fallback: if refchecker returned "unverified", try a direct fuzzy
+    # match against Semantic Scholar's search/match endpoint. Catches typos
+    # that refchecker's stricter validation rejects.
+    possible_match: dict | None = None
+    unverified = any(e.get("error_type") == "unverified" for e in hard_errors)
+    if not paper_found and unverified:
+        possible_match = await asyncio.to_thread(_fuzzy_fallback, title)
+        if possible_match:
+            warnings.append({
+                "warning_type": "fuzzy_match",
+                "warning_details": (
+                    f"Exact title not found. Closest match in Semantic Scholar: "
+                    f"'{possible_match['title']}' "
+                    f"(similarity: {possible_match['similarity']}%). "
+                    f"Verify whether this is the intended reference."
+                ),
+            })
+
     result: dict[str, Any] = {
         "verified": len(hard_errors) == 0,
         "url": paper_url,
         "matched_paper": None,
+        "possible_match": possible_match,
         "errors": hard_errors or None,
         "warnings": warnings or None,
         "info": info or None,

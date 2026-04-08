@@ -15,6 +15,9 @@ requires-python = ">=3.10"
 dependencies = [
     "academic-refchecker>=1.2.0",
     "mcp>=1.0.0",
+    "requests>=2.32.0",
+    "fuzzywuzzy>=0.18.0",
+    "python-Levenshtein>=0.25.0",
 ]
 
 [project.scripts]
