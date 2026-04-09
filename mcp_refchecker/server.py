@@ -237,6 +237,11 @@ async def verify_citation(
         arxiv_id: arXiv ID (e.g. 2301.00001).
         url: Direct URL to the paper.
     """
+    # Coerce string fields — JSON parsers may deliver e.g. arxiv_id as float (1706.03762)
+    if doi is not None:
+        doi = str(doi)
+    if arxiv_id is not None:
+        arxiv_id = str(arxiv_id)
     reference = _build_reference(title, authors, year, doi, arxiv_id, url)
     source_paper = _stub_source_paper()
 
