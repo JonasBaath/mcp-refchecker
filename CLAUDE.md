@@ -19,10 +19,10 @@ Kärn-API:et i paketet:
 - [x] Betatest: 10/10 fall godkända i clean venv.
 - [x] Registrera i `claude_desktop_config.json` och verifiera end-to-end via Claude Desktop (Fas 3).
   - Quirk: kräver ny konversation efter att connector lagts till — befintliga konversationer plockar inte upp verktyget.
-- [ ] Skriv testsvit (`tests/`) — prioritet: regressionstest för float-coercion + fuzzy fallback-logik (se Testplan nedan).
-- [ ] Sätt upp CI/CD — pytest-matrix 3.9/3.11/3.12 + publish-workflow vid `v*`-release-tags (se CI/CD nedan).
-- [ ] Göra GitHub-repot publikt.
-- [ ] PyPI-publicering (v0.2?) — CI/CD-publish-workflow ska vara på plats först.
+- [x] Skriv testsvit (`tests/`) — 13 tester, 13/13 godkända (se Testplan nedan).
+- [x] Sätt upp CI/CD — pytest-matrix 3.10/3.11/3.12 + publish-workflow vid `v*`-release-tags (se CI/CD nedan).
+- [x] Göra GitHub-repot publikt.
+- [x] PyPI-publicering — v0.1.0 tillgänglig på pypi.org.
 
 ## Designbeslut (implementerat)
 - **Singleton-checker + `asyncio.Lock`** — `ArxivReferenceChecker.__init__` är dyrt, initieras lat vid första anropet
