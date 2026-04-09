@@ -27,6 +27,9 @@ mcp-refchecker = "mcp_refchecker.server:main"
 Repository = "https://github.com/JonasBaath/mcp-refchecker"
 "Bug Tracker" = "https://github.com/JonasBaath/mcp-refchecker/issues"
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mcp_refchecker*"]
