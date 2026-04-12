@@ -11,7 +11,14 @@ from typing import Any
 import requests
 from fuzzywuzzy import fuzz
 from mcp.server.fastmcp import FastMCP
+
+# refchecker and its dependencies may print to stdout on import, which breaks
+# the MCP JSON-RPC protocol. Redirect stdout→stderr during import.
+_stdout = sys.stdout
+sys.stdout = sys.stderr
 from refchecker import ArxivReferenceChecker
+sys.stdout = _stdout
+del _stdout
 
 
 def _debug(msg: str) -> None:
