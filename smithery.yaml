@@ -1,0 +1,26 @@
+# Smithery configuration for mcp-refchecker
+# https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      semanticScholarApiKey:
+        type: string
+        description: "Semantic Scholar API key for higher rate limits (optional — apply at semanticscholar.org/product/api)"
+      crossrefMailto:
+        type: string
+        description: "Your contact email for Crossref polite pool access (optional — e.g. you@example.com)"
+      debug:
+        type: boolean
+        default: false
+        description: "Enable debug logging from the fuzzy fallback path to stderr"
+  commandFunction: |-
+    config => {
+      const env = {};
+      if (config.semanticScholarApiKey) env.SEMANTIC_SCHOLAR_API_KEY = config.semanticScholarApiKey;
+      if (config.crossrefMailto) env.CROSSREF_MAILTO = config.crossrefMailto;
+      if (config.debug) env.MCP_REFCHECKER_DEBUG = '1';
+      return { command: 'uvx', args: ['mcp-refchecker'], env };
+    }
