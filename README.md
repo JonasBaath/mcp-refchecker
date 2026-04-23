@@ -1,5 +1,7 @@
 # mcp-refchecker
 
+[![PyPI](https://img.shields.io/pypi/v/mcp-refchecker)](https://pypi.org/project/mcp-refchecker/)
+
 An MCP server that lets Claude verify academic citations in real time against [Semantic Scholar](https://www.semanticscholar.org/), [OpenAlex](https://openalex.org/), and [Crossref](https://www.crossref.org/) — catching hallucinated or incorrect references before they end up in your work.
 
 Built on top of [academic-refchecker](https://github.com/markrussinovich/refchecker) (MIT).
