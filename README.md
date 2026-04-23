@@ -69,23 +69,32 @@ This is a fundamental limitation of free academic search APIs. Crossref, OpenAle
 
 If you suspect a typo but `verify_citation` returns unverified, the best workaround is to rewrite the title in the most canonical form you can and try again.
 
-## Installation
+## Installation & configuration
+
+### Recommended: uvx (no install step)
+
+If you have [uv](https://docs.astral.sh/uv/) installed, no separate installation is needed. Add directly to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "refchecker": {
+      "command": "uvx",
+      "args": ["mcp-refchecker"]
+    }
+  }
+}
+```
+
+`uvx` downloads and runs the package in an isolated environment automatically. Restart Claude Desktop after saving the config.
+
+### Alternative: pip
 
 ```bash
 pip install mcp-refchecker
 ```
 
-Or from source:
-
-```bash
-git clone https://github.com/JonasBaath/mcp-refchecker
-cd mcp-refchecker
-pip install .
-```
-
-## Configuration
-
-Add to your `claude_desktop_config.json`:
+Then add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -97,19 +106,28 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
+### From source
+
+```bash
+git clone https://github.com/JonasBaath/mcp-refchecker
+cd mcp-refchecker
+pip install .
+```
+
 ### Optional environment variables
 
 - **`SEMANTIC_SCHOLAR_API_KEY`** — [apply for one here](https://www.semanticscholar.org/product/api) for higher rate limits on refchecker's primary verification path.
 - **`CROSSREF_MAILTO`** — your contact email, used to opt into Crossref's [polite pool](https://api.crossref.org/swagger-ui/index.html) for more reliable fuzzy fallback access.
 - **`MCP_REFCHECKER_DEBUG`** — set to any non-empty value to print debug logging from the fuzzy fallback path to stderr.
 
-Example with all optional settings:
+Example with all optional settings (uvx):
 
 ```json
 {
   "mcpServers": {
     "refchecker": {
-      "command": "mcp-refchecker",
+      "command": "uvx",
+      "args": ["mcp-refchecker"],
       "env": {
         "SEMANTIC_SCHOLAR_API_KEY": "your-key-here",
         "CROSSREF_MAILTO": "you@example.com"
